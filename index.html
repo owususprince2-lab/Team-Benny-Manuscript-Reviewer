@@ -9,7 +9,6 @@
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500;600&display=swap');
 
-  
   :root {
     --bg: #0d0f14;
     --surface: #13161d;
@@ -669,7 +668,7 @@ Return ONLY valid JSON. No preamble, no markdown fences, no explanation outside 
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-5",
         max_tokens: 8000,
         system: systemPrompt,
         messages: [{ role: "user", content: userPrompt }]
@@ -996,7 +995,6 @@ function downloadPDF() {
 
   doc.save('Team_Benny_Manuscript_Review.pdf');
 }
-  
 </script>
 </body>
 </html>
