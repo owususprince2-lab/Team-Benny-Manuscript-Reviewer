@@ -1,61 +1,70 @@
 export default {
   async fetch(request, env) {
 
-    // ─────────────────────────────
-    // CORS
-    // ─────────────────────────────
-    const corsHeaders = {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-    };
-
+    // ---------------- CORS ----------------
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: corsHeaders });
+      return new Response(null, {
+        status: 204,
+        headers: cors()
+      });
     }
 
+    // ---------------- METHOD CHECK ----------------
     if (request.method !== "POST") {
-      return new Response("Method not allowed", { status: 405, headers: corsHeaders });
+      return new Response("Method not allowed", { status: 405 });
     }
 
     try {
       const body = await request.json();
 
-      // ─────────────────────────────
-      // SAFE DEFAULTS
-      // ─────────────────────────────
-      const model = body.model || "claude-3-5-sonnet-latest";
+      const hasKey = !!env.ANTHROPIC_API_KEY;
 
-      const max_tokens = Math.min(
-        body.max_tokens || 2000,
-        4096
-      );
+      // ---------------- FREE MOCK MODE ----------------
+      if (!hasKey) {
+        const mock = {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                verdict: "Minor Revision",
+                overall_summary: "Mock mode active (no API key). Add ANTHROPIC_API_KEY to enable real review.",
+                sections: {
+                  introduction: { comments: [] },
+                  materials_methods: { comments: [] },
+                  results: { comments: [] },
+                  kinetics_modelling: { comments: [] },
+                  figures_tables: { comments: [] },
+                  citations_references: { comments: [] },
+                  writing_style: { comments: [] },
+                  economic_analysis: { comments: [] },
+                  conclusion: { comments: [] },
+                  novelty_impact: { comments: [] }
+                }
+              })
+            }
+          ]
+        };
 
-      const system =
-        typeof body.system === "string"
-          ? body.system
-          : JSON.stringify(body.system || "");
-
-      // ─────────────────────────────
-      // FORCE VALID MESSAGES FORMAT
-      // ─────────────────────────────
-      const messages = Array.isArray(body.messages)
-        ? body.messages.map(m => ({
-            role: m.role === "assistant" ? "assistant" : "user",
-            content:
-              typeof m.content === "string"
-                ? m.content
-                : JSON.stringify(m.content || "")
-          }))
-        : [];
-
-      if (messages.length === 0) {
-        return jsonError("No valid messages provided", 400, corsHeaders);
+        return json(mock);
       }
 
-      // ─────────────────────────────
-      // FINAL PAYLOAD (ANTHROPIC SAFE)
-      // ─────────────────────────────
+      // ---------------- FIX MODEL (IMPORTANT) ----------------
+      const model = body.model && body.model !== "claude-sonnet-4-5"
+        ? body.model
+        : "claude-3-5-sonnet-latest"; // safe default
+
+      // ---------------- LIMIT TOKENS ----------------
+      const max_tokens = (!body.max_tokens || body.max_tokens > 4096)
+        ? 2000
+        : body.max_tokens;
+
+      // ---------------- SYSTEM HANDLING ----------------
+      const system = body.system || "";
+
+      let messages = Array.isArray(body.messages)
+        ? body.messages.filter(m => m.role !== "system")
+        : [];
+
       const payload = {
         model,
         max_tokens,
@@ -63,68 +72,54 @@ export default {
         messages
       };
 
-      // ─────────────────────────────
-      // DEBUG (optional - remove later)
-      // ─────────────────────────────
-      console.log("Anthropic Payload:", JSON.stringify(payload));
-
-      // ─────────────────────────────
-      // CALL ANTHROPIC
-      // ─────────────────────────────
-      const response = await fetch(
-        "https://api.anthropic.com/v1/messages",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": env.ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-          },
-          body: JSON.stringify(payload),
-        }
-      );
+      // ---------------- CALL ANTHROPIC ----------------
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify(payload),
+      });
 
       const text = await response.text();
 
-      // ─────────────────────────────
-      // SAFE RESPONSE PARSE
-      // ─────────────────────────────
       let data;
       try {
         data = JSON.parse(text);
-      } catch (e) {
-        return jsonError("Invalid JSON returned from Anthropic API", 500, corsHeaders, text);
+      } catch {
+        return jsonError("Invalid JSON from Anthropic", 500);
       }
 
-      return new Response(JSON.stringify(data), {
-        status: response.status,
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders,
-        },
-      });
+      return json(data, response.status);
 
     } catch (err) {
-      return jsonError(err.message || "Unknown error", 500, corsHeaders);
+      return jsonError(err.message, 500);
     }
   }
 };
 
-// ─────────────────────────────
-// HELPERS
-// ─────────────────────────────
-function jsonError(message, status, corsHeaders, raw = null) {
-  return new Response(
-    JSON.stringify({
-      error: message,
-      raw: raw || undefined
-    }),
-    {
-      status,
-      headers: {
-        "Content-Type": "application/json",
-        ...corsHeaders,
-      },
+// ---------------- HELPERS ----------------
+
+function cors() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+  };
+}
+
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      ...cors()
     }
-  );
+  });
+}
+
+function jsonError(message, status = 400) {
+  return json({ error: message }, status);
 }
