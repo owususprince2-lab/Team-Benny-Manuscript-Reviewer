@@ -1,94 +1,130 @@
 export default {
   async fetch(request, env) {
 
-    // ---------------- CORS ----------------
-    if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        status: 204,
-        headers: cors()
-      });
+    // ─────────────────────────────
+    // CORS
+    // ─────────────────────────────
+    const corsHeaders = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    };
+
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders });
     }
 
-    if (request.method !== 'POST') {
-      return new Response('Method not allowed', { status: 405 });
+    if (request.method !== "POST") {
+      return new Response("Method not allowed", { status: 405, headers: corsHeaders });
     }
 
     try {
       const body = await request.json();
 
-      // ---------------- SAFETY PATCHES ----------------
-      if (!body.model) {
-        body.model = "claude-3-5-sonnet-latest";
+      // ─────────────────────────────
+      // SAFE DEFAULTS
+      // ─────────────────────────────
+      const model = body.model || "claude-3-5-sonnet-latest";
+
+      const max_tokens = Math.min(
+        body.max_tokens || 2000,
+        4096
+      );
+
+      const system =
+        typeof body.system === "string"
+          ? body.system
+          : JSON.stringify(body.system || "");
+
+      // ─────────────────────────────
+      // FORCE VALID MESSAGES FORMAT
+      // ─────────────────────────────
+      const messages = Array.isArray(body.messages)
+        ? body.messages.map(m => ({
+            role: m.role === "assistant" ? "assistant" : "user",
+            content:
+              typeof m.content === "string"
+                ? m.content
+                : JSON.stringify(m.content || "")
+          }))
+        : [];
+
+      if (messages.length === 0) {
+        return jsonError("No valid messages provided", 400, corsHeaders);
       }
 
-      if (!body.max_tokens || body.max_tokens > 4096) {
-        body.max_tokens = 2000;
-      }
-
-      let system = body.system || "";
-
-      if (Array.isArray(body.messages)) {
-        body.messages = body.messages.filter(m => m.role !== "system");
-      }
-
+      // ─────────────────────────────
+      // FINAL PAYLOAD (ANTHROPIC SAFE)
+      // ─────────────────────────────
       const payload = {
-        model: body.model,
-        max_tokens: body.max_tokens,
+        model,
+        max_tokens,
         system,
-        messages: body.messages
+        messages
       };
 
-      // ---------------- ANTHROPIC CALL ----------------
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': env.ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify(payload),
-      });
+      // ─────────────────────────────
+      // DEBUG (optional - remove later)
+      // ─────────────────────────────
+      console.log("Anthropic Payload:", JSON.stringify(payload));
+
+      // ─────────────────────────────
+      // CALL ANTHROPIC
+      // ─────────────────────────────
+      const response = await fetch(
+        "https://api.anthropic.com/v1/messages",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": env.ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify(payload),
+        }
+      );
 
       const text = await response.text();
 
-      // ---------------- SAFE PARSING ----------------
+      // ─────────────────────────────
+      // SAFE RESPONSE PARSE
+      // ─────────────────────────────
       let data;
       try {
         data = JSON.parse(text);
       } catch (e) {
-        return jsonError("Invalid JSON returned from Anthropic API", 500);
+        return jsonError("Invalid JSON returned from Anthropic API", 500, corsHeaders, text);
       }
 
       return new Response(JSON.stringify(data), {
         status: response.status,
         headers: {
-          'Content-Type': 'application/json',
-          ...cors()
-        }
+          "Content-Type": "application/json",
+          ...corsHeaders,
+        },
       });
 
     } catch (err) {
-      return jsonError(err.message || "Unknown error", 500);
+      return jsonError(err.message || "Unknown error", 500, corsHeaders);
     }
   }
 };
 
-// ---------------- HELPERS ----------------
-
-function cors() {
-  return {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-  };
-}
-
-function jsonError(message, status = 400) {
-  return new Response(JSON.stringify({ error: message }), {
-    status,
-    headers: {
-      'Content-Type': 'application/json',
-      ...cors()
+// ─────────────────────────────
+// HELPERS
+// ─────────────────────────────
+function jsonError(message, status, corsHeaders, raw = null) {
+  return new Response(
+    JSON.stringify({
+      error: message,
+      raw: raw || undefined
+    }),
+    {
+      status,
+      headers: {
+        "Content-Type": "application/json",
+        ...corsHeaders,
+      },
     }
-  });
+  );
 }
