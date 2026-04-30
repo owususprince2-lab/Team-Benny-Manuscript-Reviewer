@@ -1,6 +1,7 @@
 export default {
   async fetch(request, env) {
 
+    // ---------------- CORS ----------------
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         status: 204,
@@ -15,17 +16,15 @@ export default {
     try {
       const body = await request.json();
 
-      // 🔴 Normalize model (prevents 400)
+      // ---------------- SAFETY PATCHES ----------------
       if (!body.model) {
         body.model = "claude-3-5-sonnet-latest";
       }
 
-      // 🔴 Ensure max_tokens is safe
       if (!body.max_tokens || body.max_tokens > 4096) {
         body.max_tokens = 2000;
       }
 
-      // 🔴 Move system out of messages if needed
       let system = body.system || "";
 
       if (Array.isArray(body.messages)) {
@@ -39,6 +38,7 @@ export default {
         messages: body.messages
       };
 
+      // ---------------- ANTHROPIC CALL ----------------
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -51,11 +51,12 @@ export default {
 
       const text = await response.text();
 
+      // ---------------- SAFE PARSING ----------------
       let data;
       try {
         data = JSON.parse(text);
-      } catch {
-        return jsonError("Invalid JSON from Anthropic", 500);
+      } catch (e) {
+        return jsonError("Invalid JSON returned from Anthropic API", 500);
       }
 
       return new Response(JSON.stringify(data), {
@@ -67,12 +68,12 @@ export default {
       });
 
     } catch (err) {
-      return jsonError(err.message, 500);
+      return jsonError(err.message || "Unknown error", 500);
     }
   }
 };
 
-// ---------------- helpers ----------------
+// ---------------- HELPERS ----------------
 
 function cors() {
   return {
